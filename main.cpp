@@ -31,11 +31,6 @@
 #include "noad.h"
 #include "svdrpc.h"
 #include "tnoad.h"
-#ifdef USE_FFMPEG
-extern "C" {
-#include <libavcodec/version.h>
-}
-#endif
 
 const char *recDir = NULL;
 bool bFork = false;
@@ -234,7 +229,6 @@ int main(int argc, char *argv[], char * /*envp*/[])
       {"svdrpport",1,0,9},
       {"decoder",1,0,13},
       {"legacy-blackframe-refinement",0,0,14},
-      {"hwaccel",1,0,15},
       {0, 0, 0, 0}
     };
 
@@ -314,8 +308,7 @@ int main(int argc, char *argv[], char * /*envp*/[])
       break;
 
       case '?':
-        printf("unknow option ?\n");
-      break;
+        return 2; // Reject removed/unknown options before any recording is processed.
 
       case 0:
         printf ("option %s", long_options[option_index].name);
@@ -405,34 +398,9 @@ int main(int argc, char *argv[], char * /*envp*/[])
         useLegacyBlackframeRefinement = true;
         break;
 
-      case 15:
-        if (strcmp(optarg, "none") == 0)
-          useCudaDecoding = false;
-        else if (strcmp(optarg, "cuda") == 0)
-        {
-#if defined(USE_FFMPEG) && LIBAVCODEC_VERSION_MAJOR >= 58
-          useCudaDecoding = true;
-#else
-          fprintf(stderr, "noad: CUDA requires FFmpeg libavcodec 58 or newer\n");
-          return 2;
-#endif
-        }
-        else
-        {
-          fprintf(stderr, "noad: invalid hwaccel %s; use none or cuda\n", optarg);
-          return 2;
-        }
-        break;
-
       default:
         printf ("? getopt returned character code 0%o ?(option_index %d)\n", c,option_index);
     }
-  }
-
-  if (useCudaDecoding && default_Decoder != FFMPEG_DECODER)
-  {
-    fprintf(stderr, "noad: --hwaccel=cuda requires --decoder=ffmpeg\n");
-    return 2;
   }
 
   if (optind < argc)
@@ -747,8 +715,6 @@ int main(int argc, char *argv[], char * /*envp*/[])
 printf(  "--decoder[ffmpeg|libmpeg2] (default is ffmpeg)\n"
          "--legacy-blackframe-refinement\n"
          "                  opt into historical black-frame mark shifting (default off)\n"
-         "--hwaccel=none|cuda (default is none)\n"
-         "                  optional NVDEC decoding; explicit cuda never falls back to CPU\n"
          //"-C              --scenechangedetection\n"
          //"                  use scene-change-detection\n"
          "\ncmd: one of\n"

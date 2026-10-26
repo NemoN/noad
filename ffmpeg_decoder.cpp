@@ -1,10 +1,4 @@
 #include "ffmpeg_decoder.h"
-#if defined(USE_FFMPEG) && LIBAVCODEC_VERSION_MAJOR >= 58
-extern "C" {
-#include "libavutil/time.h"
-}
-#endif
-extern bool useCudaDecoding;
 extern bool decodingFailed;
 
 bool logSeeking;
@@ -147,14 +141,6 @@ FFMPegDecoder::FFMPegDecoder() :
     drainSent = false;
     decodedCount = seekCount = 0;
 #endif
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-    pHWDevice = NULL;
-    pHWFrame = pDownloadFrame = NULL;
-    pScaleContext = NULL;
-    hwPixelFormat = AV_PIX_FMT_NONE;
-    hardwareCount = 0;
-    transferMicroseconds = conversionMicroseconds = 0;
-#endif
 	__bufBytes = 0;
 	ffmpeg_index=0;
 	ffmpeg_Lastindex=0;
@@ -289,10 +275,6 @@ int FFMPegDecoder::openFile(cFileName *_cfn, cNoadIndexFile *_cIF)
 	// through avcodec_send_packet()/avcodec_receive_frame().
 #endif
 
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-    if (useCudaDecoding && initHardwareDecoder() < 0)
-        return -1;
-#endif
 	// Open codec
 #if LIBAVCODEC_VERSION_MAJOR > 54
 	if(avcodec_open2(pCodecCtx, pCodec,&avDictionary) < 0)
@@ -322,25 +304,11 @@ int FFMPegDecoder::decoder_exit()
 #if LIBAVCODEC_VERSION_MAJOR >= 57
     if (decodedCount)
     {
-        fprintf(stderr, "noad decoder: backend=%s frames=%llu seeks=%llu",
-                useCudaDecoding ? "cuda" : "none",
+        fprintf(stderr, "noad decoder: backend=cpu frames=%llu seeks=%llu\n",
                 (unsigned long long)decodedCount, (unsigned long long)seekCount);
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-        fprintf(stderr, " hardware_frames=%llu transfer_seconds=%.6f conversion_seconds=%.6f",
-                (unsigned long long)hardwareCount, transferMicroseconds / 1000000.0,
-                conversionMicroseconds / 1000000.0);
-#endif
-        fprintf(stderr, "\n");
         decodedCount = 0;
     }
     av_packet_free(&pPacket);
-#endif
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-    av_frame_free(&pHWFrame);
-    av_frame_free(&pDownloadFrame);
-    sws_freeContext(pScaleContext);
-    pScaleContext = NULL;
-    av_buffer_unref(&pHWDevice);
 #endif
 	// Free the YUV frame
 	if( pFrame )
@@ -388,116 +356,6 @@ int FFMPegDecoder::decoder_exit()
 #endif
 	return 0;
 }
-
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-AVPixelFormat FFMPegDecoder::selectHardwareFormat(AVCodecContext *ctx, const AVPixelFormat *formats)
-{
-    FFMPegDecoder *self = static_cast<FFMPegDecoder *>(ctx->opaque);
-    for (const AVPixelFormat *fmt = formats; *fmt != AV_PIX_FMT_NONE; ++fmt)
-        if (*fmt == self->hwPixelFormat)
-            return *fmt;
-    fprintf(stderr, "noad: requested CUDA format unavailable; refusing CPU fallback\n");
-    return AV_PIX_FMT_NONE;
-}
-
-int FFMPegDecoder::initHardwareDecoder()
-{
-    for (int n = 0;; ++n)
-    {
-        const AVCodecHWConfig *config = avcodec_get_hw_config(pCodec, n);
-        if (!config)
-        {
-            fprintf(stderr, "noad: decoder %s has no CUDA/NVDEC support in this FFmpeg build\n", pCodec->name);
-            return -1;
-        }
-        if (config->device_type == AV_HWDEVICE_TYPE_CUDA &&
-            config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
-        {
-            hwPixelFormat = config->pix_fmt;
-            break;
-        }
-    }
-    int rc = av_hwdevice_ctx_create(&pHWDevice, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0);
-    if (rc < 0)
-    {
-        fprintf(stderr, "noad: CUDA device initialization failed (%d); refusing CPU fallback\n", rc);
-        return rc;
-    }
-    pCodecCtx->hw_device_ctx = av_buffer_ref(pHWDevice);
-    pHWFrame = av_frame_alloc();
-    pDownloadFrame = av_frame_alloc();
-    if (!pCodecCtx->hw_device_ctx || !pHWFrame || !pDownloadFrame)
-        return AVERROR(ENOMEM);
-    pCodecCtx->opaque = this;
-    pCodecCtx->get_format = selectHardwareFormat;
-    fprintf(stderr, "noad: CUDA/NVDEC selected for %s\n", pCodec->name);
-    return 0;
-}
-#endif
-
-bool FFMPegDecoder::finishDecodedFrame()
-{
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-    if (useCudaDecoding)
-    {
-        if (pHWFrame->format != hwPixelFormat)
-        {
-            fprintf(stderr, "noad: received a software frame in explicit CUDA mode\n");
-            ffmpegerror = decodingFailed = true;
-            return false;
-        }
-        av_frame_unref(pDownloadFrame);
-        int64_t started = av_gettime_relative();
-        int rc = av_hwframe_transfer_data(pDownloadFrame, pHWFrame, 0);
-        transferMicroseconds += av_gettime_relative() - started;
-        if (rc < 0)
-        {
-            fprintf(stderr, "noad: CUDA frame download failed (%d)\n", rc);
-            ffmpegerror = decodingFailed = true;
-            return false;
-        }
-        started = av_gettime_relative();
-        // NVDEC surfaces are commonly NV12. noad's callbacks require planar
-        // YUV420P, including the GOP buffer; never pass CUDA/NV12 pointers there.
-        pScaleContext = sws_getCachedContext(pScaleContext,
-            pDownloadFrame->width, pDownloadFrame->height, (AVPixelFormat)pDownloadFrame->format,
-            pDownloadFrame->width, pDownloadFrame->height, AV_PIX_FMT_YUV420P,
-            SWS_POINT, NULL, NULL, NULL);
-        if (!pScaleContext)
-        {
-            ffmpegerror = decodingFailed = true;
-            return false;
-        }
-        if (pFrame->format != AV_PIX_FMT_YUV420P ||
-            pFrame->width != pDownloadFrame->width || pFrame->height != pDownloadFrame->height)
-        {
-            av_frame_unref(pFrame);
-            pFrame->format = AV_PIX_FMT_YUV420P;
-            pFrame->width = pDownloadFrame->width;
-            pFrame->height = pDownloadFrame->height;
-            if (av_frame_get_buffer(pFrame, 32) < 0)
-            {
-                ffmpegerror = decodingFailed = true;
-                return false;
-            }
-        }
-        if (av_frame_make_writable(pFrame) < 0 ||
-            sws_scale(pScaleContext, pDownloadFrame->data, pDownloadFrame->linesize,
-                      0, pDownloadFrame->height, pFrame->data, pFrame->linesize) != pFrame->height)
-        {
-            ffmpegerror = decodingFailed = true;
-            return false;
-        }
-        conversionMicroseconds += av_gettime_relative() - started;
-        ++hardwareCount;
-    }
-#endif
-#if LIBAVCODEC_VERSION_MAJOR >= 57
-    ++decodedCount;
-#endif
-    return true;
-}
-
 
 bool FFMPegDecoder::GetVideoFrame(bool restart)
 {
@@ -611,14 +469,12 @@ loop_exit:
     }
     for (;;)
     {
-        AVFrame *output = pFrame;
-#if LIBAVCODEC_VERSION_MAJOR >= 58
-        if (useCudaDecoding)
-            output = pHWFrame;
-#endif
-        ret = avcodec_receive_frame(pCodecCtx, output);
+        ret = avcodec_receive_frame(pCodecCtx, pFrame);
         if (ret == 0)
-            return finishDecodedFrame();
+        {
+            ++decodedCount;
+            return true;
+        }
         if (ret == AVERROR_EOF)
             return false;
         if (ret != AVERROR(EAGAIN) || drainSent)

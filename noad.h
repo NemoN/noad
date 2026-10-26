@@ -99,7 +99,6 @@ extern bool doPass2;
 extern bool doPass3;
 extern bool pass3only;
 extern bool useLegacyBlackframeRefinement;
-extern bool useCudaDecoding;
 extern bool decodingFailed;
 extern bool useSceneChangeDetection;
 extern bool detectOverlaps;

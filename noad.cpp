@@ -141,7 +141,6 @@ bool doPass2 = true;
 // A black frame inside an advert is not evidence that the programme returned.
 // Preserve logo boundaries unless the historical heuristic is explicitly requested.
 bool useLegacyBlackframeRefinement = false;
-bool useCudaDecoding = false;
 bool decodingFailed = false;
 bool pass3only = false;
 

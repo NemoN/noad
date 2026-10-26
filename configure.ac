@@ -125,7 +125,7 @@ AC_ARG_WITH([ffmpeg],
             [with_ffmpeg=yes])
 
 if test "x$with_ffmpeg" != "xno" ; then
-  PKG_CHECK_MODULES(FFMPEG, libavutil libavformat libswscale [libavcodec >= 52.0.0], HAVE_FFMPEG=1, HAVE_FFMPEG=0)
+  PKG_CHECK_MODULES(FFMPEG, libavutil libavformat [libavcodec >= 52.0.0], HAVE_FFMPEG=1, HAVE_FFMPEG=0)
   if test "$HAVE_FFMPEG" = "1"; then
     LIBAVCODEC_VERSION="`pkg-config --modversion libavcodec`"
     AC_MSG_NOTICE([found libavcodec Version $LIBAVCODEC_VERSION])
