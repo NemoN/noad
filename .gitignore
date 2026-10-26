@@ -66,3 +66,7 @@ _*
 *.swo
 *.swn
 *~
+
+# Python validation artifacts
+__pycache__/
+*.pyc

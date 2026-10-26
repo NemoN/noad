@@ -138,6 +138,11 @@ bool doPass2 = true;
   bool markComments = false;
   bool doPass3 = false;
 #endif
+// A black frame inside an advert is not evidence that the programme returned.
+// Preserve logo boundaries unless the historical heuristic is explicitly requested.
+bool useLegacyBlackframeRefinement = false;
+bool useCudaDecoding = false;
+bool decodingFailed = false;
 bool pass3only = false;
 
 int iLastIFrame = 0;
@@ -1026,6 +1031,11 @@ void checkOnMarks(cMarks *marks)
 
 bool checkBlackFramesOnMarks(cMarks *marks)
 {
+    if (!useLegacyBlackframeRefinement)
+    {
+        dsyslog("Blackframe refinement disabled: preserving logo-return marks");
+        return false;
+    }
 	dsyslog( "check video for BlackFrames" );
    noadCallback oldCallback = decoder->getCallback();
 	decoder->setCallback(nBlacklineCallback);
@@ -1643,8 +1653,17 @@ int scanRecord( int iNumFrames, cMarks *_marks )
 #endif
   syslog(LOG_INFO, "noad is using %s for video-decoding", default_Decoder == FFMPEG_DECODER ? "ffmpeg" : "libmpeg2" );
 
-	decoder->decoder_init();
-	decoder->openFile(cfn,cIF);
+    if (!decoder || decoder->decoder_init() < 0 || decoder->openFile(cfn, cIF) < 0)
+    {
+        fprintf(stderr, "noad: video decoder initialization failed; no marks generated\n");
+        decodingFailed = true;
+#ifndef VNOAD
+        delete cfn;
+        delete cIF;
+#endif
+        delete localMarks;
+        return -1;
+    }
 
 	INFO("scan the video for ad's","");
 #ifdef HAVE_LIBAVCODEC
@@ -2336,6 +2355,8 @@ void logpiconfos(pic_info *picinfos, int iPics)
 #define MAXBACK (45*framespersec)
 bool checkBlackFrameOnMarks(cMark *m, cMarks *marks, pic_info *picsafter, int iPics)
 {
+    if (!useLegacyBlackframeRefinement)
+        return false;
 
    //  dsyslog( "checkBlackFrameOnMark at %d %s",m->position, bForward ? "forward":"backward" );
    bool bForward = false;

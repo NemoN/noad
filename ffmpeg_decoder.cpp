@@ -1,4 +1,11 @@
 #include "ffmpeg_decoder.h"
+#if defined(USE_FFMPEG) && LIBAVCODEC_VERSION_MAJOR >= 58
+extern "C" {
+#include "libavutil/time.h"
+}
+#endif
+extern bool useCudaDecoding;
+extern bool decodingFailed;
 
 bool logSeeking;
 bool logReading = false;
@@ -130,7 +137,24 @@ FFMPegDecoder::FFMPegDecoder() :
 	pCodecPar = NULL;
 #endif
 	pCodec = NULL;
+#if LIBAVCODEC_VERSION_MAJOR > 54
+    avDictionary = NULL;
+#endif
 	pFrame = NULL;
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    pPacket = NULL;
+    packetPending = false;
+    drainSent = false;
+    decodedCount = seekCount = 0;
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    pHWDevice = NULL;
+    pHWFrame = pDownloadFrame = NULL;
+    pScaleContext = NULL;
+    hwPixelFormat = AV_PIX_FMT_NONE;
+    hardwareCount = 0;
+    transferMicroseconds = conversionMicroseconds = 0;
+#endif
 	__bufBytes = 0;
 	ffmpeg_index=0;
 	ffmpeg_Lastindex=0;
@@ -152,14 +176,21 @@ int FFMPegDecoder::decoder_init()
 #ifdef USE_AVIOCONTEXT
 #define IOBUFSIZE (1024L*200L)
    iobuffer = (unsigned char*)av_malloc(IOBUFSIZE);
+   if (!iobuffer)
+       return -1;
    pIOContext =  avio_alloc_context(
                   iobuffer,
                   IOBUFSIZE,
                   0,
                   this,
                   noad_read_packet,
-                  noad_write_packet,
+                  NULL, // This AVIO context is read-only.
                   noad_seek);
+   if (!pIOContext)
+   {
+       av_freep(&iobuffer);
+       return -1;
+   }
 #endif
 	   return 0;
 }
@@ -250,12 +281,18 @@ int FFMPegDecoder::openFile(cFileName *_cfn, cNoadIndexFile *_cIF)
 
    // Create CodecContext from Codec
    pCodecCtx= avcodec_alloc_context3(pCodec);
+   if (!pCodecCtx || avcodec_parameters_to_context(pCodecCtx, pCodecPar) < 0)
+       return -1;
 
 	// The modern FFmpeg API no longer exposes the legacy truncated-bitstream
 	// flag used by older versions. The decoder handles packet boundaries
 	// through avcodec_send_packet()/avcodec_receive_frame().
 #endif
 
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    if (useCudaDecoding && initHardwareDecoder() < 0)
+        return -1;
+#endif
 	// Open codec
 #if LIBAVCODEC_VERSION_MAJOR > 54
 	if(avcodec_open2(pCodecCtx, pCodec,&avDictionary) < 0)
@@ -268,7 +305,11 @@ int FFMPegDecoder::openFile(cFileName *_cfn, cNoadIndexFile *_cIF)
 #if LIBAVCODEC_VERSION_MAJOR < 57
 	pFrame=avcodec_alloc_frame();
 #else
-	pFrame=av_frame_alloc();
+    if (!pFrame)
+        pFrame = av_frame_alloc();
+    pPacket = av_packet_alloc();
+    if (!pFrame || !pPacket)
+        return -1;
 #endif
 	cont_reading = true;
 	doSeekPos = false;
@@ -278,11 +319,38 @@ int FFMPegDecoder::openFile(cFileName *_cfn, cNoadIndexFile *_cIF)
 
 int FFMPegDecoder::decoder_exit()
 {
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    if (decodedCount)
+    {
+        fprintf(stderr, "noad decoder: backend=%s frames=%llu seeks=%llu",
+                useCudaDecoding ? "cuda" : "none",
+                (unsigned long long)decodedCount, (unsigned long long)seekCount);
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+        fprintf(stderr, " hardware_frames=%llu transfer_seconds=%.6f conversion_seconds=%.6f",
+                (unsigned long long)hardwareCount, transferMicroseconds / 1000000.0,
+                conversionMicroseconds / 1000000.0);
+#endif
+        fprintf(stderr, "\n");
+        decodedCount = 0;
+    }
+    av_packet_free(&pPacket);
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    av_frame_free(&pHWFrame);
+    av_frame_free(&pDownloadFrame);
+    sws_freeContext(pScaleContext);
+    pScaleContext = NULL;
+    av_buffer_unref(&pHWDevice);
+#endif
 	// Free the YUV frame
 	if( pFrame )
 	{
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+        av_frame_free(&pFrame);
+#else
 		av_free(pFrame);
 		pFrame = NULL;
+#endif
 	}
 
 	// close the file
@@ -309,8 +377,8 @@ int FFMPegDecoder::decoder_exit()
 #ifdef USE_AVIOCONTEXT
    if( pIOContext )
    {
-      //av_free(iobuffer);
-      av_free(pIOContext);
+      av_freep(&pIOContext->buffer);
+      avio_context_free(&pIOContext);
       pIOContext = NULL;
 	}
 #endif
@@ -321,14 +389,126 @@ int FFMPegDecoder::decoder_exit()
 	return 0;
 }
 
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+AVPixelFormat FFMPegDecoder::selectHardwareFormat(AVCodecContext *ctx, const AVPixelFormat *formats)
+{
+    FFMPegDecoder *self = static_cast<FFMPegDecoder *>(ctx->opaque);
+    for (const AVPixelFormat *fmt = formats; *fmt != AV_PIX_FMT_NONE; ++fmt)
+        if (*fmt == self->hwPixelFormat)
+            return *fmt;
+    fprintf(stderr, "noad: requested CUDA format unavailable; refusing CPU fallback\n");
+    return AV_PIX_FMT_NONE;
+}
+
+int FFMPegDecoder::initHardwareDecoder()
+{
+    for (int n = 0;; ++n)
+    {
+        const AVCodecHWConfig *config = avcodec_get_hw_config(pCodec, n);
+        if (!config)
+        {
+            fprintf(stderr, "noad: decoder %s has no CUDA/NVDEC support in this FFmpeg build\n", pCodec->name);
+            return -1;
+        }
+        if (config->device_type == AV_HWDEVICE_TYPE_CUDA &&
+            config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX)
+        {
+            hwPixelFormat = config->pix_fmt;
+            break;
+        }
+    }
+    int rc = av_hwdevice_ctx_create(&pHWDevice, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, 0);
+    if (rc < 0)
+    {
+        fprintf(stderr, "noad: CUDA device initialization failed (%d); refusing CPU fallback\n", rc);
+        return rc;
+    }
+    pCodecCtx->hw_device_ctx = av_buffer_ref(pHWDevice);
+    pHWFrame = av_frame_alloc();
+    pDownloadFrame = av_frame_alloc();
+    if (!pCodecCtx->hw_device_ctx || !pHWFrame || !pDownloadFrame)
+        return AVERROR(ENOMEM);
+    pCodecCtx->opaque = this;
+    pCodecCtx->get_format = selectHardwareFormat;
+    fprintf(stderr, "noad: CUDA/NVDEC selected for %s\n", pCodec->name);
+    return 0;
+}
+#endif
+
+bool FFMPegDecoder::finishDecodedFrame()
+{
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    if (useCudaDecoding)
+    {
+        if (pHWFrame->format != hwPixelFormat)
+        {
+            fprintf(stderr, "noad: received a software frame in explicit CUDA mode\n");
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        av_frame_unref(pDownloadFrame);
+        int64_t started = av_gettime_relative();
+        int rc = av_hwframe_transfer_data(pDownloadFrame, pHWFrame, 0);
+        transferMicroseconds += av_gettime_relative() - started;
+        if (rc < 0)
+        {
+            fprintf(stderr, "noad: CUDA frame download failed (%d)\n", rc);
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        started = av_gettime_relative();
+        // NVDEC surfaces are commonly NV12. noad's callbacks require planar
+        // YUV420P, including the GOP buffer; never pass CUDA/NV12 pointers there.
+        pScaleContext = sws_getCachedContext(pScaleContext,
+            pDownloadFrame->width, pDownloadFrame->height, (AVPixelFormat)pDownloadFrame->format,
+            pDownloadFrame->width, pDownloadFrame->height, AV_PIX_FMT_YUV420P,
+            SWS_POINT, NULL, NULL, NULL);
+        if (!pScaleContext)
+        {
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        if (pFrame->format != AV_PIX_FMT_YUV420P ||
+            pFrame->width != pDownloadFrame->width || pFrame->height != pDownloadFrame->height)
+        {
+            av_frame_unref(pFrame);
+            pFrame->format = AV_PIX_FMT_YUV420P;
+            pFrame->width = pDownloadFrame->width;
+            pFrame->height = pDownloadFrame->height;
+            if (av_frame_get_buffer(pFrame, 32) < 0)
+            {
+                ffmpegerror = decodingFailed = true;
+                return false;
+            }
+        }
+        if (av_frame_make_writable(pFrame) < 0 ||
+            sws_scale(pScaleContext, pDownloadFrame->data, pDownloadFrame->linesize,
+                      0, pDownloadFrame->height, pFrame->data, pFrame->linesize) != pFrame->height)
+        {
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        conversionMicroseconds += av_gettime_relative() - started;
+        ++hardwareCount;
+    }
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    ++decodedCount;
+#endif
+    return true;
+}
+
+
 bool FFMPegDecoder::GetVideoFrame(bool restart)
 {
+#if LIBAVCODEC_VERSION_MAJOR < 57
   static AVPacket packet;
   static int      bytesRemaining=0;
   static uint8_t  *rawData;
   static bool     fFirstTime=true;
   int             bytesDecoded;
   int             frameFinished;
+#endif
   int             ret;
 
 #if LIBAVCODEC_VERSION_MAJOR < 57
@@ -420,71 +600,59 @@ loop_exit:
 
   return frameFinished!=0;
 #else
-	// libavcodec 57+
-	if( restart )
-	{
-		if(packet.data!=NULL)
-			av_packet_unref(&packet);
-		packet.data=NULL;
-		avcodec_flush_buffers(pCodecCtx);
-	}
-	else
-	{
-		ret = avcodec_receive_frame(pCodecCtx, pFrame);
-		if (ret < 0 && ret != AVERROR(EAGAIN))
-		{
-			ffmpegerror = true;
-			return false;
-		}
-	}
-
-	do
-	{
-		do
-		{
-			// Free packet
-			if(packet.data!=NULL)
-				av_packet_unref(&packet);
-
-			// Read new packet
-			ret = av_read_frame(pFormatCtx, &packet);
-			if(ret < 0)
-			{
-				if (ret == AVERROR_EOF)
-				{ // create draining packet
-					packet.data = NULL;
-					packet.size = 0;
-				}
-				else
-				{
-					if (packet.data!=NULL)
-						av_packet_unref(&packet);
-					ffmpegerror = true;
-					return false;
-				}
-			}
-		} while(packet.stream_index!=videoStream && ret != AVERROR_EOF);
-
-		ret = avcodec_send_packet(pCodecCtx, &packet);
-		if (packet.data!=NULL)
-			av_packet_unref(&packet);
-
-		if (ret < 0 && ret != AVERROR(EAGAIN))
-		{
-			ffmpegerror = true;
-			return false;
-		}
-
-		ret = avcodec_receive_frame(pCodecCtx, pFrame);
-		if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-		{
-			ffmpegerror = true;
-			return false;
-		}
-
-	} while (ret != 0 && ret != AVERROR_EOF);
-
-	return ret != AVERROR_EOF;
+    // Drain each output before reading another packet. The former implementation
+    // discarded a successfully received buffered frame and could drop input on EAGAIN.
+    if (restart)
+    {
+        av_packet_unref(pPacket);
+        packetPending = false;
+        drainSent = false;
+        avcodec_flush_buffers(pCodecCtx);
+    }
+    for (;;)
+    {
+        AVFrame *output = pFrame;
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+        if (useCudaDecoding)
+            output = pHWFrame;
+#endif
+        ret = avcodec_receive_frame(pCodecCtx, output);
+        if (ret == 0)
+            return finishDecodedFrame();
+        if (ret == AVERROR_EOF)
+            return false;
+        if (ret != AVERROR(EAGAIN) || drainSent)
+        {
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        if (!packetPending)
+        {
+            do
+            {
+                av_packet_unref(pPacket);
+                ret = av_read_frame(pFormatCtx, pPacket);
+            } while (ret >= 0 && pPacket->stream_index != videoStream);
+            if (ret < 0 && ret != AVERROR_EOF)
+            {
+                ffmpegerror = decodingFailed = true;
+                return false;
+            }
+            packetPending = ret >= 0;
+        }
+        ret = avcodec_send_packet(pCodecCtx, packetPending ? pPacket : NULL);
+        if (ret == AVERROR(EAGAIN))
+            continue; // Keep the packet until the codec accepts it.
+        if (ret < 0)
+        {
+            ffmpegerror = decodingFailed = true;
+            return false;
+        }
+        if (!packetPending)
+            drainSent = true;
+        av_packet_unref(pPacket);
+        packetPending = false;
+    }
 #endif
 }
 
@@ -613,18 +781,30 @@ void FFMPegDecoder::resetDecoder()
 	//	av_read_frame_flush(pFormatCtx);
 	if( pCodecCtx )
 		avcodec_flush_buffers(pCodecCtx);
-	if( pFrame )
-		av_free(pFrame);
 #if LIBAVCODEC_VERSION_MAJOR < 57
-	pFrame=avcodec_alloc_frame();
+    if (pFrame)
+        av_free(pFrame);
+    pFrame = avcodec_alloc_frame();
 #else
-	pFrame=av_frame_alloc();
+    if (pFrame)
+        av_frame_unref(pFrame);
+    else
+        pFrame = av_frame_alloc();
+    if (pPacket)
+        av_packet_unref(pPacket);
+    packetPending = drainSent = false;
 #endif
 	__bufBytes = 0;
 }
 
 void FFMPegDecoder::resetDecoder(int iFrame)
 {
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    ++seekCount;
+    if (pPacket)
+        av_packet_unref(pPacket);
+    packetPending = drainSent = false;
+#endif
 	__bufBytes = 0;
 	ffmpeg_index = iFrame;
 	cIF->Get(ffmpeg_index,&ffmpegFileNumber, &ffmpegFileOffset);

@@ -1,0 +1,3 @@
+# These upstream files use CRLF. Keep whitespace checks useful for their edits.
+ffmpeg_decoder.cpp whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+ffmpeg_decoder.h whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

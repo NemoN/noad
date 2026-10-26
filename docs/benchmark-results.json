@@ -1,0 +1,378 @@
+{
+  "date": "2026-10-26",
+  "upstream_commit": "54f6b3d5c79e4c87884a92a3154a3c63ee8ed7bc",
+  "binary_sha256": "80d792e04866cae7d7da2b8d352cd68ef1149dc6e15cbb849c42ee535fbc7914",
+  "hardware": {
+    "cpu": "Intel Core i5-6600T @ 2.70 GHz",
+    "gpu": "NVIDIA Quadro P600 2 GiB",
+    "driver": "580.178.04",
+    "ffmpeg": "6.1.5",
+    "nv_codec_headers": "12.1.14.0"
+  },
+  "protocol": {
+    "same_binary_for_cpu_and_cuda": true,
+    "sequential": true,
+    "cpu_affinity": [
+      2
+    ],
+    "cpu_quota_percent": 100,
+    "nice": 19,
+    "memory_limit_gib": 2,
+    "inputs": "SHA-256 identical SSD inputs and VDR indices; fresh trial outputs; full cache warmup and mincore >=99% before each trial.",
+    "repetitions": "Six CPU/CUDA pairs; sports-sd and magazine-sd-a repeated in reversed order.",
+    "timing": "Analysis including GPU initialization, seeks, transfers and conversion; excludes copy, index generation and cache warmup.",
+    "all_recordings_and_production_edls_unchanged_during_trials": true
+  },
+  "recordings": [
+    {
+      "case": "sports-sd",
+      "codec": "mpeg2video",
+      "fps": 25,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 19.75,
+          "cpu_seconds": 19.75,
+          "max_rss_kib": 13608,
+          "frames": 24394,
+          "seeks": 478,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        },
+        {
+          "round": 3,
+          "wall_seconds": 19.83,
+          "cpu_seconds": 19.82,
+          "max_rss_kib": 13556,
+          "frames": 24394,
+          "seeks": 478,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 22.39,
+          "cpu_seconds": 11.3,
+          "max_rss_kib": 142228,
+          "frames": 24393,
+          "seeks": 478,
+          "hardware_frames": 24393,
+          "gpu_decoder_peak_percent": 60,
+          "transfer_seconds": 7.648106,
+          "conversion_seconds": 1.721017
+        },
+        {
+          "round": 3,
+          "wall_seconds": 21.88,
+          "cpu_seconds": 10.89,
+          "max_rss_kib": 142260,
+          "frames": 24393,
+          "seeks": 478,
+          "hardware_frames": 24393,
+          "gpu_decoder_peak_percent": 60,
+          "transfer_seconds": 7.540978,
+          "conversion_seconds": 1.627422
+        }
+      ],
+      "cpu_median_wall_seconds": 19.79,
+      "cuda_median_wall_seconds": 22.134999999999998,
+      "mark_comparison": {
+        "matches": true,
+        "expected_marks": 18,
+        "actual_marks": 18,
+        "delta_frames": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "maximum_absolute_delta_frames": 0
+      }
+    },
+    {
+      "case": "magazine-sd-a",
+      "codec": "mpeg2video",
+      "fps": 25,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 14.4,
+          "cpu_seconds": 14.36,
+          "max_rss_kib": 12492,
+          "frames": 19309,
+          "seeks": 319,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        },
+        {
+          "round": 3,
+          "wall_seconds": 14.2,
+          "cpu_seconds": 14.19,
+          "max_rss_kib": 12468,
+          "frames": 19309,
+          "seeks": 319,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 12.86,
+          "cpu_seconds": 5.79,
+          "max_rss_kib": 141432,
+          "frames": 14577,
+          "seeks": 338,
+          "hardware_frames": 14577,
+          "gpu_decoder_peak_percent": 59,
+          "transfer_seconds": 4.470404,
+          "conversion_seconds": 1.068221
+        },
+        {
+          "round": 3,
+          "wall_seconds": 12.61,
+          "cpu_seconds": 5.68,
+          "max_rss_kib": 141552,
+          "frames": 14577,
+          "seeks": 338,
+          "hardware_frames": 14577,
+          "gpu_decoder_peak_percent": 59,
+          "transfer_seconds": 4.410149,
+          "conversion_seconds": 1.027261
+        }
+      ],
+      "cpu_median_wall_seconds": 14.3,
+      "cuda_median_wall_seconds": 12.735,
+      "mark_comparison": {
+        "matches": false,
+        "expected_marks": 6,
+        "actual_marks": 6,
+        "delta_frames": [
+          0,
+          -12,
+          456,
+          0,
+          0,
+          0
+        ],
+        "maximum_absolute_delta_frames": 456
+      }
+    },
+    {
+      "case": "magazine-sd-b",
+      "codec": "mpeg2video",
+      "fps": 25,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 9.38,
+          "cpu_seconds": 9.37,
+          "max_rss_kib": 12292,
+          "frames": 14230,
+          "seeks": 333,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 13.89,
+          "cpu_seconds": 6.63,
+          "max_rss_kib": 141416,
+          "frames": 15591,
+          "seeks": 332,
+          "hardware_frames": 15591,
+          "gpu_decoder_peak_percent": 58,
+          "transfer_seconds": 4.898725,
+          "conversion_seconds": 1.103492
+        }
+      ],
+      "cpu_median_wall_seconds": 9.38,
+      "cuda_median_wall_seconds": 13.89,
+      "mark_comparison": {
+        "matches": false,
+        "expected_marks": 10,
+        "actual_marks": 10,
+        "delta_frames": [
+          0,
+          0,
+          180,
+          576,
+          -12,
+          384,
+          0,
+          -300,
+          -12,
+          0
+        ],
+        "maximum_absolute_delta_frames": 576
+      }
+    },
+    {
+      "case": "documentary-sd",
+      "codec": "mpeg2video",
+      "fps": 25,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 8.37,
+          "cpu_seconds": 8.36,
+          "max_rss_kib": 12188,
+          "frames": 13928,
+          "seeks": 247,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 12.88,
+          "cpu_seconds": 6.46,
+          "max_rss_kib": 141264,
+          "frames": 13902,
+          "seeks": 247,
+          "hardware_frames": 13902,
+          "gpu_decoder_peak_percent": 56,
+          "transfer_seconds": 4.333447,
+          "conversion_seconds": 0.915166
+        }
+      ],
+      "cpu_median_wall_seconds": 8.37,
+      "cuda_median_wall_seconds": 12.88,
+      "mark_comparison": {
+        "matches": true,
+        "expected_marks": 6,
+        "actual_marks": 6,
+        "delta_frames": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "maximum_absolute_delta_frames": 0
+      }
+    },
+    {
+      "case": "drama-hd-a",
+      "codec": "h264",
+      "fps": 50,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 57.21,
+          "cpu_seconds": 57.15,
+          "max_rss_kib": 29428,
+          "frames": 12671,
+          "seeks": 366,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 104.14,
+          "cpu_seconds": 25.39,
+          "max_rss_kib": 160952,
+          "frames": 12671,
+          "seeks": 366,
+          "hardware_frames": 12671,
+          "gpu_decoder_peak_percent": 75,
+          "transfer_seconds": 7.665528,
+          "conversion_seconds": 2.485883
+        }
+      ],
+      "cpu_median_wall_seconds": 57.21,
+      "cuda_median_wall_seconds": 104.14,
+      "mark_comparison": {
+        "matches": true,
+        "expected_marks": 2,
+        "actual_marks": 2,
+        "delta_frames": [
+          0,
+          0
+        ],
+        "maximum_absolute_delta_frames": 0
+      }
+    },
+    {
+      "case": "drama-hd-b",
+      "codec": "h264",
+      "fps": 50,
+      "cpu": [
+        {
+          "round": 2,
+          "wall_seconds": 94.93,
+          "cpu_seconds": 94.88,
+          "max_rss_kib": 29232,
+          "frames": 22114,
+          "seeks": 415,
+          "hardware_frames": 0,
+          "gpu_decoder_peak_percent": 0,
+          "transfer_seconds": 0.0,
+          "conversion_seconds": 0.0
+        }
+      ],
+      "cuda": [
+        {
+          "round": 2,
+          "wall_seconds": 124.99,
+          "cpu_seconds": 32.39,
+          "max_rss_kib": 160368,
+          "frames": 22114,
+          "seeks": 415,
+          "hardware_frames": 22114,
+          "gpu_decoder_peak_percent": 82,
+          "transfer_seconds": 13.015583,
+          "conversion_seconds": 4.033907
+        }
+      ],
+      "cpu_median_wall_seconds": 94.93,
+      "cuda_median_wall_seconds": 124.99,
+      "mark_comparison": {
+        "matches": true,
+        "expected_marks": 2,
+        "actual_marks": 2,
+        "delta_frames": [
+          0,
+          0
+        ],
+        "maximum_absolute_delta_frames": 0
+      }
+    }
+  ]
+}

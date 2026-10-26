@@ -8,6 +8,10 @@ extern "C"
 {
   #include "libavcodec/avcodec.h"
   #include "libavformat/avformat.h"
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+  #include "libavutil/hwcontext.h"
+  #include "libswscale/swscale.h"
+#endif
 }
 #define DEMUX_RESET 2
 #define FFMPEG_SUPPRESS_NOPICTURE_ERROR
@@ -29,6 +33,26 @@ class FFMPegDecoder : public MPEGDecoder
    AVDictionary    *avDictionary;
 #endif
 	AVFrame         *pFrame;
+#if LIBAVCODEC_VERSION_MAJOR >= 57
+    AVPacket        *pPacket;
+    bool            packetPending;
+    bool            drainSent;
+    uint64_t        decodedCount;
+    uint64_t        seekCount;
+#endif
+#if LIBAVCODEC_VERSION_MAJOR >= 58
+    AVBufferRef     *pHWDevice;
+    AVFrame         *pHWFrame;
+    AVFrame         *pDownloadFrame;
+    SwsContext      *pScaleContext;
+    AVPixelFormat   hwPixelFormat;
+    uint64_t        hardwareCount;
+    int64_t         transferMicroseconds;
+    int64_t         conversionMicroseconds;
+    static AVPixelFormat selectHardwareFormat(AVCodecContext *ctx, const AVPixelFormat *formats);
+    int initHardwareDecoder();
+#endif
+    bool finishDecodedFrame();
 
 public:
 	int __bufBytes;

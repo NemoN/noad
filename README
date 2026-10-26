@@ -2,6 +2,8 @@
 station-logos for the detection and produces cutting-marks for the recording.
 It is developed as an "addon" for the Video Disk Recorder (VDR).
 
+Fork changes, build instructions, and CPU/CUDA validation: README.fork.md
+
 Written by:            'theNoad' (real-name not given)
                         theNoad@ulmail.net
                         theNoad@SoftHome.net

@@ -31,6 +31,11 @@
 #include "noad.h"
 #include "svdrpc.h"
 #include "tnoad.h"
+#ifdef USE_FFMPEG
+extern "C" {
+#include <libavcodec/version.h>
+}
+#endif
 
 const char *recDir = NULL;
 bool bFork = false;
@@ -78,6 +83,8 @@ void doNoad(bool isLive, const char *fname)
     iNumFrames = iNewNumFrames;
     cctrl = NULL;
     iNewNumFrames = doX11Scan(pdata, fname, iNumFrames);
+    if (iNewNumFrames < 0)
+      decodingFailed = true;
     //if( cctrl != NULL )
     //  delete cctrl;
     //cctrl = NULL;
@@ -226,6 +233,8 @@ int main(int argc, char *argv[], char * /*envp*/[])
       {"svdrphost",1,0,8},
       {"svdrpport",1,0,9},
       {"decoder",1,0,13},
+      {"legacy-blackframe-refinement",0,0,14},
+      {"hwaccel",1,0,15},
       {0, 0, 0, 0}
     };
 
@@ -392,9 +401,38 @@ int main(int argc, char *argv[], char * /*envp*/[])
                   default_Decoder == FFMPEG_DECODER ? "ffmpeg" : "libmepg2");
         break;
 
+      case 14:
+        useLegacyBlackframeRefinement = true;
+        break;
+
+      case 15:
+        if (strcmp(optarg, "none") == 0)
+          useCudaDecoding = false;
+        else if (strcmp(optarg, "cuda") == 0)
+        {
+#if defined(USE_FFMPEG) && LIBAVCODEC_VERSION_MAJOR >= 58
+          useCudaDecoding = true;
+#else
+          fprintf(stderr, "noad: CUDA requires FFmpeg libavcodec 58 or newer\n");
+          return 2;
+#endif
+        }
+        else
+        {
+          fprintf(stderr, "noad: invalid hwaccel %s; use none or cuda\n", optarg);
+          return 2;
+        }
+        break;
+
       default:
         printf ("? getopt returned character code 0%o ?(option_index %d)\n", c,option_index);
     }
+  }
+
+  if (useCudaDecoding && default_Decoder != FFMPEG_DECODER)
+  {
+    fprintf(stderr, "noad: --hwaccel=cuda requires --decoder=ffmpeg\n");
+    return 2;
   }
 
   if (optind < argc)
@@ -643,7 +681,7 @@ int main(int argc, char *argv[], char * /*envp*/[])
 
     if( !bNoPid )
       rm_pidfile(recDir);
-    return 0;
+    return decodingFailed ? EXIT_FAILURE : EXIT_SUCCESS;
   }
 
   // nothing done, give the user some help
@@ -707,6 +745,10 @@ int main(int argc, char *argv[], char * /*envp*/[])
          "                  some marks in the \"marks.vdr\" for this recording\n");
 
 printf(  "--decoder[ffmpeg|libmpeg2] (default is ffmpeg)\n"
+         "--legacy-blackframe-refinement\n"
+         "                  opt into historical black-frame mark shifting (default off)\n"
+         "--hwaccel=none|cuda (default is none)\n"
+         "                  optional NVDEC decoding; explicit cuda never falls back to CPU\n"
          //"-C              --scenechangedetection\n"
          //"                  use scene-change-detection\n"
          "\ncmd: one of\n"
